@@ -669,28 +669,6 @@ Enter the sequence that represents barcoding reads of an empty vector""",
             argmax_per_obj = [cyclecode[x] for x in argmax_per_obj]
 
             master_cycles.append(list(argmax_per_obj))
-            try:
-                # Final safety check - if shapes don't match, resize the score_array
-                if score_array.shape[1] != len(score_per_obj):
-                    logging.warning(
-                        f"CallBarcodes: Resizing score_array from {score_array.shape} to ({ncycles}, {len(score_per_obj)})"
-                    )
-                    new_score_array = numpy.zeros([ncycles, len(score_per_obj)])
-                    # Copy any existing data that fits
-                    if score_array.shape[1] > 0:
-                        min_cols = min(score_array.shape[1], new_score_array.shape[1])
-                        new_score_array[:, :min_cols] = score_array[:, :min_cols]
-                    score_array = new_score_array
-                score_array[eachcycle - 1] = score_per_obj
-            except ValueError as e:
-                logging.error(
-                    f"CallBarcodes: Error assigning scores to array. score_array shape={score_array.shape}, score_per_obj shape={score_per_obj.shape}"
-                )
-                logging.error(
-                    f"CallBarcodes: cycle_measures_perobj shape={cycle_measures_perobj.shape}"
-                )
-                logging.error(f"CallBarcodes: Original error: {str(e)}")
-                raise
 
         mean_per_object = score_array.mean(axis=0)
         logging.warning(f"CallBarcodes: mean_per_object shape={mean_per_object.shape}")
