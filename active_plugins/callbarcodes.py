@@ -522,7 +522,6 @@ Enter the sequence that represents barcoding reads of an empty vector""",
                         measurementdict[parsed_cycle] = {eachmeas: parsed_base}
                     else:
                         measurementdict[parsed_cycle].update({eachmeas: parsed_base})
-
         return measurementdict
 
     def callonebarcode(
@@ -541,7 +540,6 @@ Enter the sequence that represents barcoding reads of an empty vector""",
                     measurements.get_current_measurement(object_name, eachmeasure)
                 )
                 cyclecode.append(measurementdict[eachcycle][eachmeasure])
-
             cycle_measures_perobj = numpy.transpose(numpy.array(cycles_measures_perobj))
             argmax_per_obj = numpy.argmax(cycle_measures_perobj, 1)
             max_per_obj = numpy.max(cycle_measures_perobj, 1)
