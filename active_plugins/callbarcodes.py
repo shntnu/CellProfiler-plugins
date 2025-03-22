@@ -369,6 +369,34 @@ Enter the sequence that represents barcoding reads of an empty vector""",
         logging.warning(
             f"CallBarcodes: Number of measurements for {self.input_object_name.value}: {len(listofmeasurements)}"
         )
+        if len(listofmeasurements) > 0:
+            logging.warning(
+                f"CallBarcodes: First measurement name: '{listofmeasurements[0]}'"
+            )
+            # Also log the first few measurements to see the pattern
+            logging.warning(
+                f"CallBarcodes: First few measurements: {listofmeasurements[:5]}"
+            )
+
+            # Show the length of the first measurement to understand why objectcount is 0
+            first_measurement_data = measurements.get_current_measurement(
+                self.input_object_name.value, listofmeasurements[0]
+            )
+            logging.warning(
+                f"CallBarcodes: First measurement length: {len(first_measurement_data) if hasattr(first_measurement_data, '__len__') else 'N/A'}"
+            )
+            logging.warning(
+                f"CallBarcodes: First measurement type: {type(first_measurement_data)}"
+            )
+            if (
+                hasattr(first_measurement_data, "__len__")
+                and len(first_measurement_data) > 0
+            ):
+                logging.warning(
+                    f"CallBarcodes: First measurement sample: {first_measurement_data[: min(5, len(first_measurement_data))]}"
+                )
+        else:
+            logging.warning("CallBarcodes: No measurements found for this object!")
 
         measurements_for_calls = self.getallbarcodemeasurements(
             listofmeasurements, self.ncycles.value, self.cycle1measure.value
