@@ -366,57 +366,22 @@ Enter the sequence that represents barcoding reads of an empty vector""",
         listofmeasurements = measurements.get_feature_names(
             self.input_object_name.value
         )
-        logging.warning(
-            f"CallBarcodes: Number of measurements for {self.input_object_name.value}: {len(listofmeasurements)}"
-        )
-        if len(listofmeasurements) > 0:
-            logging.warning(
-                f"CallBarcodes: First measurement name: '{listofmeasurements[0]}'"
-            )
-            # Also log the first few measurements to see the pattern
-            logging.warning(
-                f"CallBarcodes: First few measurements: {listofmeasurements[:5]}"
-            )
-
-            # Show the length of the first measurement to understand why objectcount is 0
-            first_measurement_data = measurements.get_current_measurement(
-                self.input_object_name.value, listofmeasurements[0]
-            )
-            logging.warning(
-                f"CallBarcodes: First measurement length: {len(first_measurement_data) if hasattr(first_measurement_data, '__len__') else 'N/A'}"
-            )
-            logging.warning(
-                f"CallBarcodes: First measurement type: {type(first_measurement_data)}"
-            )
-            if (
-                hasattr(first_measurement_data, "__len__")
-                and len(first_measurement_data) > 0
-            ):
-                logging.warning(
-                    f"CallBarcodes: First measurement sample: {first_measurement_data[: min(5, len(first_measurement_data))]}"
-                )
-        else:
-            logging.warning("CallBarcodes: No measurements found for this object!")
 
         measurements_for_calls = self.getallbarcodemeasurements(
             listofmeasurements, self.ncycles.value, self.cycle1measure.value
         )
-        logging.warning(
-            f"CallBarcodes: Measurements for calls cycles: {list(measurements_for_calls.keys())}"
-        )
 
-        # Improved objectcount calculation: use a valid measurement from cycle 1 instead of the first measurement
-        # which might not have the right length
+        # Use a valid measurement from cycle 1 instead of arbitrary first measurement
         if 1 in measurements_for_calls and len(measurements_for_calls[1]) > 0:
-            # Use one of our actual cycle measurements instead of a random one
+            # Use one of our actual cycle measurements
             first_cycle_measure = list(measurements_for_calls[1].keys())[0]
             objectcount = len(
                 measurements.get_current_measurement(
                     self.input_object_name.value, first_cycle_measure
                 )
             )
-            logging.warning(
-                f"CallBarcodes: Using {first_cycle_measure} to get object count: {objectcount}"
+            logging.info(
+                f"CallBarcodes: Using {first_cycle_measure} for object count: {objectcount}"
             )
         else:
             # Fallback to original method
@@ -425,28 +390,6 @@ Enter the sequence that represents barcoding reads of an empty vector""",
                     self.input_object_name.value, listofmeasurements[0]
                 )
             )
-            logging.warning(
-                f"CallBarcodes: Using fallback method for object count: {objectcount}"
-            )
-
-        # Additional safety check
-        if objectcount == 0:
-            # Check all measurements in first cycle to see if any have data
-            for cycle in measurements_for_calls:
-                for measure in measurements_for_calls[cycle]:
-                    data = measurements.get_current_measurement(
-                        self.input_object_name.value, measure
-                    )
-                    if hasattr(data, "__len__") and len(data) > 0:
-                        objectcount = len(data)
-                        logging.warning(
-                            f"CallBarcodes: Found objects in {measure}, correcting count to {objectcount}"
-                        )
-                        break
-                if objectcount > 0:
-                    break
-
-        logging.warning(f"CallBarcodes: Final object count: {objectcount}")
 
         calledbarcodes, quality_scores = self.callonebarcode(
             measurements_for_calls,
@@ -566,9 +509,6 @@ Enter the sequence that represents barcoding reads of an empty vector""",
 
     def getallbarcodemeasurements(self, measurements, ncycles, examplemeas):
         stem = re.split("Cycle", examplemeas)[0]
-        logging.warning(
-            f"CallBarcodes: Stem for measurements: '{stem}', example: '{examplemeas}'"
-        )
         measurementdict = {}
         for eachmeas in measurements:
             if stem in eachmeas:
@@ -583,43 +523,13 @@ Enter the sequence that represents barcoding reads of an empty vector""",
                     else:
                         measurementdict[parsed_cycle].update({eachmeas: parsed_base})
 
-        # Log results
-        logging.warning(
-            f"CallBarcodes: Found {len(measurementdict)} cycle entries in measurements"
-        )
-        for cycle in measurementdict:
-            logging.warning(
-                f"CallBarcodes: Cycle {cycle} has {len(measurementdict[cycle])} measurements"
-            )
-
         return measurementdict
 
     def callonebarcode(
         self, measurementdict, measurements, object_name, ncycles, objectcount
     ):
         master_cycles = []
-        logging.warning(f"CallBarcodes: ncycles={ncycles}, objectcount={objectcount}")
-
-        # Safety check - if objectcount is reported as 0 but we have measurements, use the measurement length
-        if objectcount == 0:
-            # Try to get a better objectcount from the first cycle's first measurement
-            if 1 in measurementdict and len(measurementdict[1]) > 0:
-                first_measure = list(measurementdict[1].keys())[0]
-                data = measurements.get_current_measurement(object_name, first_measure)
-                if hasattr(data, "__len__") and len(data) > 0:
-                    objectcount = len(data)
-                    logging.warning(
-                        f"CallBarcodes: Corrected object count to {objectcount} based on {first_measure}"
-                    )
-
-        # Ensure objectcount is at least 1 to avoid empty arrays
-        if objectcount == 0:
-            logging.error(
-                "CallBarcodes: Object count is still 0 after correction attempts. This will cause errors."
-            )
-
         score_array = numpy.zeros([ncycles, objectcount])
-        logging.warning(f"CallBarcodes: score_array shape={score_array.shape}")
 
         for eachcycle in range(1, ncycles + 1):
             cycles_measures_perobj = []
@@ -632,46 +542,18 @@ Enter the sequence that represents barcoding reads of an empty vector""",
                 )
                 cyclecode.append(measurementdict[eachcycle][eachmeasure])
 
-            if eachcycle == 1:  # Only log for first cycle to avoid excessive logging
-                for i, measure in enumerate(cyclemeasures):
-                    data = measurements.get_current_measurement(object_name, measure)
-                    logging.warning(
-                        f"CallBarcodes: Measure {measure} has type {type(data)} and length {len(data) if hasattr(data, '__len__') else 'N/A'}"
-                    )
-                    if hasattr(data, "__len__") and len(data) > 0:
-                        logging.warning(
-                            f"CallBarcodes: First few values: {data[: min(5, len(data))]}"
-                        )
-                        # If we still have a zero objectcount but have data, update the array
-                        if objectcount == 0 and len(data) > 0:
-                            objectcount = len(data)
-                            logging.warning(
-                                f"CallBarcodes: Recreating score_array with corrected length {objectcount}"
-                            )
-                            score_array = numpy.zeros([ncycles, objectcount])
-
-            # Skip empty data
-            if len(cycles_measures_perobj) == 0:
-                logging.warning(
-                    f"CallBarcodes: No measures for cycle {eachcycle}, skipping"
-                )
-                continue
-
             cycle_measures_perobj = numpy.transpose(numpy.array(cycles_measures_perobj))
             argmax_per_obj = numpy.argmax(cycle_measures_perobj, 1)
             max_per_obj = numpy.max(cycle_measures_perobj, 1)
             sum_per_obj = numpy.sum(cycle_measures_perobj, 1)
             score_per_obj = max_per_obj / sum_per_obj
-            logging.warning(
-                f"CallBarcodes: Cycle {eachcycle}, score_per_obj shape={score_per_obj.shape}, length={len(score_per_obj)}"
-            )
             argmax_per_obj = list(argmax_per_obj)
             argmax_per_obj = [cyclecode[x] for x in argmax_per_obj]
 
             master_cycles.append(list(argmax_per_obj))
+            score_array[eachcycle - 1] = score_per_obj
 
         mean_per_object = score_array.mean(axis=0)
-        logging.warning(f"CallBarcodes: mean_per_object shape={mean_per_object.shape}")
 
         return list(map("".join, zip(*master_cycles))), mean_per_object
 
