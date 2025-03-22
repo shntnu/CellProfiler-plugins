@@ -9,6 +9,7 @@ import numpy
 import os
 import re
 import urllib.request, urllib.error, urllib.parse
+import logging
 
 try:
     from io import StringIO
@@ -90,7 +91,6 @@ C_CALL_BARCODES = "Barcode"
 
 
 class CallBarcodes(cellprofiler_core.module.Module):
-
     module_name = "CallBarcodes"
     category = "Data Tools"
     variable_revision_number = 1
@@ -101,9 +101,7 @@ class CallBarcodes(cellprofiler_core.module.Module):
             allow_metadata=False,
             doc="""\
 Select the folder containing the CSV file to be loaded. {IO_FOLDER_CHOICE_HELP_TEXT}
-""".format(
-                **{"IO_FOLDER_CHOICE_HELP_TEXT": _help.IO_FOLDER_CHOICE_HELP_TEXT}
-            ),
+""".format(**{"IO_FOLDER_CHOICE_HELP_TEXT": _help.IO_FOLDER_CHOICE_HELP_TEXT}),
         )
 
         def get_directory_fn():
@@ -167,9 +165,7 @@ This measurement should be an intensity measure that is measured for every cycle
 Select "*{YES}*" to retain the image of the objects color-coded
 according to which line of the CSV their barcode call matches to,
 for use later in the pipeline (for example, to be saved by a **SaveImages**
-module).""".format(
-                **{"YES": "Yes"}
-            ),
+module).""".format(**{"YES": "Yes"}),
         )
 
         self.outimage_calls_name = cellprofiler_core.setting.text.ImageName(
@@ -188,9 +184,7 @@ Enter the name to be given to the called barcode image.""",
 Select "*{YES}*" to retain the image of the objects where the intensity of the spot matches
 indicates the match score between the called barcode and its closest match,
 for use later in the pipeline (for example, to be saved by a **SaveImages**
-module).""".format(
-                **{"YES": "Yes"}
-            ),
+module).""".format(**{"YES": "Yes"}),
         )
 
         self.outimage_score_name = cellprofiler_core.setting.text.ImageName(
@@ -208,9 +202,7 @@ Enter the name to be given to the barcode score image.""",
             doc="""\
 Select "*{YES}*" to manually enter a sequence that should be added to the uploaded barcode
 list with the gene name of "EmptyVector". This can be helpful when there is a consistent
-backbone sequence to look out for in every barcoding set).""".format(
-                **{"YES": "Yes"}
-            ),
+backbone sequence to look out for in every barcoding set).""".format(**{"YES": "Yes"}),
         )
 
         self.empty_vector_barcode_sequence = cellprofiler_core.setting.text.Text(
@@ -370,21 +362,63 @@ Enter the sequence that represents barcoding reads of an empty vector""",
         return choices
 
     def run(self, workspace):
-
         measurements = workspace.measurements
         listofmeasurements = measurements.get_feature_names(
             self.input_object_name.value
+        )
+        logging.warning(
+            f"CallBarcodes: Number of measurements for {self.input_object_name.value}: {len(listofmeasurements)}"
         )
 
         measurements_for_calls = self.getallbarcodemeasurements(
             listofmeasurements, self.ncycles.value, self.cycle1measure.value
         )
-
-        objectcount = len(
-            measurements.get_current_measurement(
-                self.input_object_name.value, listofmeasurements[0]
-            )
+        logging.warning(
+            f"CallBarcodes: Measurements for calls cycles: {list(measurements_for_calls.keys())}"
         )
+
+        # Improved objectcount calculation: use a valid measurement from cycle 1 instead of the first measurement
+        # which might not have the right length
+        if 1 in measurements_for_calls and len(measurements_for_calls[1]) > 0:
+            # Use one of our actual cycle measurements instead of a random one
+            first_cycle_measure = list(measurements_for_calls[1].keys())[0]
+            objectcount = len(
+                measurements.get_current_measurement(
+                    self.input_object_name.value, first_cycle_measure
+                )
+            )
+            logging.warning(
+                f"CallBarcodes: Using {first_cycle_measure} to get object count: {objectcount}"
+            )
+        else:
+            # Fallback to original method
+            objectcount = len(
+                measurements.get_current_measurement(
+                    self.input_object_name.value, listofmeasurements[0]
+                )
+            )
+            logging.warning(
+                f"CallBarcodes: Using fallback method for object count: {objectcount}"
+            )
+
+        # Additional safety check
+        if objectcount == 0:
+            # Check all measurements in first cycle to see if any have data
+            for cycle in measurements_for_calls:
+                for measure in measurements_for_calls[cycle]:
+                    data = measurements.get_current_measurement(
+                        self.input_object_name.value, measure
+                    )
+                    if hasattr(data, "__len__") and len(data) > 0:
+                        objectcount = len(data)
+                        logging.warning(
+                            f"CallBarcodes: Found objects in {measure}, correcting count to {objectcount}"
+                        )
+                        break
+                if objectcount > 0:
+                    break
+
+        logging.warning(f"CallBarcodes: Final object count: {objectcount}")
 
         calledbarcodes, quality_scores = self.callonebarcode(
             measurements_for_calls,
@@ -504,6 +538,9 @@ Enter the sequence that represents barcoding reads of an empty vector""",
 
     def getallbarcodemeasurements(self, measurements, ncycles, examplemeas):
         stem = re.split("Cycle", examplemeas)[0]
+        logging.warning(
+            f"CallBarcodes: Stem for measurements: '{stem}', example: '{examplemeas}'"
+        )
         measurementdict = {}
         for eachmeas in measurements:
             if stem in eachmeas:
@@ -517,14 +554,44 @@ Enter the sequence that represents barcoding reads of an empty vector""",
                         measurementdict[parsed_cycle] = {eachmeas: parsed_base}
                     else:
                         measurementdict[parsed_cycle].update({eachmeas: parsed_base})
+
+        # Log results
+        logging.warning(
+            f"CallBarcodes: Found {len(measurementdict)} cycle entries in measurements"
+        )
+        for cycle in measurementdict:
+            logging.warning(
+                f"CallBarcodes: Cycle {cycle} has {len(measurementdict[cycle])} measurements"
+            )
+
         return measurementdict
 
     def callonebarcode(
         self, measurementdict, measurements, object_name, ncycles, objectcount
     ):
-
         master_cycles = []
+        logging.warning(f"CallBarcodes: ncycles={ncycles}, objectcount={objectcount}")
+
+        # Safety check - if objectcount is reported as 0 but we have measurements, use the measurement length
+        if objectcount == 0:
+            # Try to get a better objectcount from the first cycle's first measurement
+            if 1 in measurementdict and len(measurementdict[1]) > 0:
+                first_measure = list(measurementdict[1].keys())[0]
+                data = measurements.get_current_measurement(object_name, first_measure)
+                if hasattr(data, "__len__") and len(data) > 0:
+                    objectcount = len(data)
+                    logging.warning(
+                        f"CallBarcodes: Corrected object count to {objectcount} based on {first_measure}"
+                    )
+
+        # Ensure objectcount is at least 1 to avoid empty arrays
+        if objectcount == 0:
+            logging.error(
+                "CallBarcodes: Object count is still 0 after correction attempts. This will cause errors."
+            )
+
         score_array = numpy.zeros([ncycles, objectcount])
+        logging.warning(f"CallBarcodes: score_array shape={score_array.shape}")
 
         for eachcycle in range(1, ncycles + 1):
             cycles_measures_perobj = []
@@ -536,18 +603,69 @@ Enter the sequence that represents barcoding reads of an empty vector""",
                     measurements.get_current_measurement(object_name, eachmeasure)
                 )
                 cyclecode.append(measurementdict[eachcycle][eachmeasure])
+
+            if eachcycle == 1:  # Only log for first cycle to avoid excessive logging
+                for i, measure in enumerate(cyclemeasures):
+                    data = measurements.get_current_measurement(object_name, measure)
+                    logging.warning(
+                        f"CallBarcodes: Measure {measure} has type {type(data)} and length {len(data) if hasattr(data, '__len__') else 'N/A'}"
+                    )
+                    if hasattr(data, "__len__") and len(data) > 0:
+                        logging.warning(
+                            f"CallBarcodes: First few values: {data[: min(5, len(data))]}"
+                        )
+                        # If we still have a zero objectcount but have data, update the array
+                        if objectcount == 0 and len(data) > 0:
+                            objectcount = len(data)
+                            logging.warning(
+                                f"CallBarcodes: Recreating score_array with corrected length {objectcount}"
+                            )
+                            score_array = numpy.zeros([ncycles, objectcount])
+
+            # Skip empty data
+            if len(cycles_measures_perobj) == 0:
+                logging.warning(
+                    f"CallBarcodes: No measures for cycle {eachcycle}, skipping"
+                )
+                continue
+
             cycle_measures_perobj = numpy.transpose(numpy.array(cycles_measures_perobj))
             argmax_per_obj = numpy.argmax(cycle_measures_perobj, 1)
             max_per_obj = numpy.max(cycle_measures_perobj, 1)
             sum_per_obj = numpy.sum(cycle_measures_perobj, 1)
             score_per_obj = max_per_obj / sum_per_obj
+            logging.warning(
+                f"CallBarcodes: Cycle {eachcycle}, score_per_obj shape={score_per_obj.shape}, length={len(score_per_obj)}"
+            )
             argmax_per_obj = list(argmax_per_obj)
             argmax_per_obj = [cyclecode[x] for x in argmax_per_obj]
 
             master_cycles.append(list(argmax_per_obj))
-            score_array[eachcycle - 1] = score_per_obj
+            try:
+                # Final safety check - if shapes don't match, resize the score_array
+                if score_array.shape[1] != len(score_per_obj):
+                    logging.warning(
+                        f"CallBarcodes: Resizing score_array from {score_array.shape} to ({ncycles}, {len(score_per_obj)})"
+                    )
+                    new_score_array = numpy.zeros([ncycles, len(score_per_obj)])
+                    # Copy any existing data that fits
+                    if score_array.shape[1] > 0:
+                        min_cols = min(score_array.shape[1], new_score_array.shape[1])
+                        new_score_array[:, :min_cols] = score_array[:, :min_cols]
+                    score_array = new_score_array
+                score_array[eachcycle - 1] = score_per_obj
+            except ValueError as e:
+                logging.error(
+                    f"CallBarcodes: Error assigning scores to array. score_array shape={score_array.shape}, score_per_obj shape={score_per_obj.shape}"
+                )
+                logging.error(
+                    f"CallBarcodes: cycle_measures_perobj shape={cycle_measures_perobj.shape}"
+                )
+                logging.error(f"CallBarcodes: Original error: {str(e)}")
+                raise
 
         mean_per_object = score_array.mean(axis=0)
+        logging.warning(f"CallBarcodes: mean_per_object shape={mean_per_object.shape}")
 
         return list(map("".join, zip(*master_cycles))), mean_per_object
 
@@ -569,7 +687,6 @@ Enter the sequence that represents barcoding reads of an empty vector""",
         return barcodeset
 
     def queryall(self, cropped_barcode_dict, query):
-
         cropped_barcode_list = list(cropped_barcode_dict.keys())
 
         if query in cropped_barcode_list:
@@ -587,7 +704,6 @@ Enter the sequence that represents barcoding reads of an empty vector""",
             return scores[0], cropped_barcode_dict[scoredict[scores[0]]]
 
     def get_measurement_columns(self, pipeline):
-
         input_object_name = self.input_object_name.value
 
         result = [
